@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as sgMail from '@sendgrid/mail';
+import sgMail from '@sendgrid/mail';
 import type { AppEnv } from '../config/env';
 
 @Injectable()
@@ -15,9 +15,17 @@ export class EmailService {
     const fromEmail = this.config.get('SENDGRID_FROM_EMAIL', { infer: true });
 
     if (apiKey && fromEmail) {
-      sgMail.setApiKey(apiKey);
-      this.isConfigured = true;
-      this.fromEmail = fromEmail;
+      try {
+        sgMail.setApiKey(apiKey);
+        this.isConfigured = true;
+        this.fromEmail = fromEmail;
+      } catch (e: unknown) {
+        // Don't crash the app in development due to misconfiguration.
+        // In production, env validation should enforce a correct setup.
+        this.logger.error('Failed to initialize SendGrid', e as Error);
+        this.isConfigured = false;
+        this.fromEmail = null;
+      }
     }
   }
 
@@ -33,20 +41,33 @@ export class EmailService {
       throw new Error('SendGrid is not configured');
     }
 
-    await sgMail.send({
-      to: toEmail,
-      from: this.fromEmail,
-      subject: 'Your Laviou password reset code',
-      text: `Your password reset code is: ${otp}\n\nThis code expires in 10 minutes.`,
-      html: `
-        <div style="font-family:Arial,sans-serif;line-height:1.5">
-          <h2>Password reset</h2>
-          <p>Your password reset code is:</p>
-          <p style="font-size:28px;letter-spacing:4px;font-weight:bold">${otp}</p>
-          <p>This code expires in <b>10 minutes</b>.</p>
-          <p>If you didn't request this, you can ignore this email.</p>
-        </div>
-      `,
-    });
+    try {
+      await sgMail.send({
+        to: toEmail,
+        from: this.fromEmail,
+        subject: 'Your Laviou password reset code',
+        text: `Your password reset code is: ${otp}\n\nThis code expires in 10 minutes.`,
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.5">
+            <h2>Password reset</h2>
+            <p>Your password reset code is:</p>
+            <p style="font-size:28px;letter-spacing:4px;font-weight:bold">${otp}</p>
+            <p>This code expires in <b>10 minutes</b>.</p>
+            <p>If you didn't request this, you can ignore this email.</p>
+          </div>
+        `,
+      });
+    } catch (e: unknown) {
+      // In dev, allow testing without blocking on email delivery.
+      if (nodeEnv !== 'production') {
+        this.logger.error(
+          `SendGrid send failed; falling back to console OTP for ${toEmail}`,
+          e as Error,
+        );
+        this.logger.warn(`OTP for ${toEmail}: ${otp}`);
+        return;
+      }
+      throw e;
+    }
   }
 }
