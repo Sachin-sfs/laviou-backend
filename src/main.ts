@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { ValidationPipe } from '@nestjs/common';
 import { HttpExceptionFilter } from './common/http-exception.filter';
+import { requestLogger } from './common/request-logger';
 import type { AppEnv } from './config/env';
 import {
   DocumentBuilder,
@@ -29,6 +30,7 @@ async function bootstrap() {
   });
 
   app.setGlobalPrefix('api');
+  app.use(requestLogger);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
