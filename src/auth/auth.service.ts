@@ -199,14 +199,13 @@ export class AuthService {
   }
 
   async forgotPassword(email: string): Promise<{ sent: true }> {
-    // Always return success (avoid user enumeration).
     const user = await this.prisma.user.findUnique({
       where: { email },
       select: { id: true },
     });
 
     if (!user) {
-      return { sent: true as const };
+      throw new BadRequestException('Email not found');
     }
 
     const otp = this.createOtp();

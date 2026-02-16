@@ -122,14 +122,14 @@ export class AuthController {
     schema: {
       example: {
         success: true,
-        message: 'If the email exists, a reset code was sent.',
+        message: 'Reset code sent.',
         data: { sent: true },
       },
     },
   })
   async forgotPassword(@Body() body: ForgotPasswordDto) {
     const res = await this.auth.forgotPassword(body.email);
-    return ok(res, 'If the email exists, a reset code was sent.');
+    return ok(res, 'Reset code sent.');
   }
 
   @Post('verify-reset-otp')
