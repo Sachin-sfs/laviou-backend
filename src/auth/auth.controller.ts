@@ -7,6 +7,7 @@ import {
   Req,
   UseGuards,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
@@ -14,8 +15,10 @@ import { ok } from '../common/api';
 import { ApiJwtAuth } from '../common/swagger';
 import { JwtAuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -108,15 +111,31 @@ export class AuthController {
   }
 
   @Post('forgot-password')
-  @HttpCode(501)
-  forgotPassword() {
-    // Not implemented yet (no email service wired).
-    return ok(null, 'Not implemented');
+  @ApiOperation({ summary: 'Request a password reset token (OTP)' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        success: true,
+        message: 'If the email exists, a reset code was sent.',
+        data: { token: '123456' },
+      },
+    },
+  })
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    const res = await this.auth.forgotPassword(body.email);
+    return ok(res, 'If the email exists, a reset code was sent.');
   }
 
   @Post('reset-password')
-  @HttpCode(501)
-  resetPassword() {
-    return ok(null, 'Not implemented');
+  @ApiOperation({ summary: 'Reset password with OTP/token' })
+  @ApiOkResponse({
+    schema: {
+      example: { success: true, message: 'Password reset', data: true },
+    },
+  })
+  async resetPassword(@Body() body: ResetPasswordDto) {
+    if (!body.password) throw new BadRequestException('Password is required');
+    await this.auth.resetPassword(body.token, body.password);
+    return ok(true as const, 'Password reset');
   }
 }

@@ -13,8 +13,15 @@ import type {
   AuthUserDto,
 } from './auth.types';
 
+type PasswordResetRecord = {
+  userId: string;
+  expiresAt: number;
+};
+
 @Injectable()
 export class AuthService {
+  private readonly passwordResetTokens = new Map<string, PasswordResetRecord>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -114,5 +121,48 @@ export class AuthService {
     });
     if (!user) throw new UnauthorizedException('User not found');
     return this.toUserDto(user);
+  }
+
+  async forgotPassword(email: string): Promise<{ token?: string }> {
+    // Always return success (avoid user enumeration).
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return {};
+    }
+
+    // Simple 6-digit OTP token for dev/testing.
+    const token = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    this.passwordResetTokens.set(token, { userId: user.id, expiresAt });
+
+    // In production you'd email/SMS the token, not return it.
+    const env =
+      this.config.get<string>('NODE_ENV', { infer: true }) ?? 'development';
+    if (env === 'production') return {};
+    return { token };
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const record = this.passwordResetTokens.get(token);
+    if (!record) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+    if (Date.now() > record.expiresAt) {
+      this.passwordResetTokens.delete(token);
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: record.userId },
+      data: { passwordHash },
+    });
+
+    this.passwordResetTokens.delete(token);
   }
 }
