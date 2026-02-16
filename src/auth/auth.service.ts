@@ -6,27 +6,23 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { createHash, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AppEnv } from '../config/env';
+import { EmailService } from '../email/email.service';
 import type {
   AuthRegisterResultDto,
   AuthTokensDto,
   AuthUserDto,
 } from './auth.types';
 
-type PasswordResetRecord = {
-  userId: string;
-  expiresAt: number;
-};
-
 @Injectable()
 export class AuthService {
-  private readonly passwordResetTokens = new Map<string, PasswordResetRecord>();
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-    private readonly config: ConfigService,
+    private readonly config: ConfigService<AppEnv, true>,
+    private readonly email: EmailService,
   ) {}
 
   private toUserDto(user: {
@@ -52,6 +48,16 @@ export class AuthService {
     const bb = Buffer.from(b);
     if (ba.length !== bb.length) return false;
     return timingSafeEqual(ba, bb);
+  }
+
+  private createOtp(): string {
+    // 6-digit code
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  private createResetToken(): string {
+    // 32 bytes -> 64 hex chars
+    return randomBytes(32).toString('hex');
   }
 
   private async issueTokens(user: {
@@ -192,7 +198,7 @@ export class AuthService {
     return this.toUserDto(user);
   }
 
-  async forgotPassword(email: string): Promise<{ token?: string }> {
+  async forgotPassword(email: string): Promise<{ sent: true }> {
     // Always return success (avoid user enumeration).
     const user = await this.prisma.user.findUnique({
       where: { email },
@@ -200,42 +206,106 @@ export class AuthService {
     });
 
     if (!user) {
-      return {};
+      return { sent: true as const };
     }
 
-    // Simple 6-digit OTP token for dev/testing.
-    const token = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const otp = this.createOtp();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    this.passwordResetTokens.set(token, { userId: user.id, expiresAt });
+    await this.prisma.passwordResetRequest.create({
+      data: {
+        userId: user.id,
+        otpHash: this.hashToken(otp),
+        otpExpiresAt,
+      },
+      select: { id: true },
+    });
 
-    // In production you'd email/SMS the token, not return it.
-    const env =
-      this.config.get<string>('NODE_ENV', { infer: true }) ?? 'development';
-    if (env === 'production') return {};
-    return { token };
+    await this.email.sendPasswordResetOtp(email, otp);
+
+    // Never return OTP in API response.
+    return { sent: true as const };
+  }
+
+  async verifyResetOtp(input: {
+    email: string;
+    otp: string;
+  }): Promise<{ resetToken: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: input.email },
+      select: { id: true },
+    });
+
+    // Avoid leaking whether the email exists; use a generic error.
+    if (!user) throw new BadRequestException('Invalid code');
+
+    const now = new Date();
+    const request = await this.prisma.passwordResetRequest.findFirst({
+      where: {
+        userId: user.id,
+        otpExpiresAt: { gt: now },
+        verifiedAt: null,
+        usedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, otpHash: true },
+    });
+
+    if (!request) throw new BadRequestException('Invalid code');
+
+    const presentedHash = this.hashToken(input.otp);
+    if (!this.safeEquals(request.otpHash, presentedHash)) {
+      throw new BadRequestException('Invalid code');
+    }
+
+    const resetToken = this.createResetToken();
+    const resetTokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    await this.prisma.passwordResetRequest.update({
+      where: { id: request.id },
+      data: {
+        verifiedAt: now,
+        resetTokenHash: this.hashToken(resetToken),
+        resetTokenExpiresAt,
+      },
+      select: { id: true },
+    });
+
+    return { resetToken };
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    const record = this.passwordResetTokens.get(token);
-    if (!record) {
-      throw new BadRequestException('Invalid or expired token');
-    }
-    if (Date.now() > record.expiresAt) {
-      this.passwordResetTokens.delete(token);
-      throw new BadRequestException('Invalid or expired token');
-    }
+    const now = new Date();
+    const resetTokenHash = this.hashToken(token);
 
-    const passwordHash = await bcrypt.hash(newPassword, 10);
-    await this.prisma.user.update({
-      where: { id: record.userId },
-      data: {
-        passwordHash,
-        refreshTokenHash: null,
-        refreshTokenExpiresAt: null,
+    const request = await this.prisma.passwordResetRequest.findFirst({
+      where: {
+        resetTokenHash,
+        resetTokenExpiresAt: { gt: now },
+        verifiedAt: { not: null },
+        usedAt: null,
       },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, userId: true },
     });
 
-    this.passwordResetTokens.delete(token);
+    if (!request) throw new BadRequestException('Invalid or expired token');
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: request.userId },
+        data: {
+          passwordHash,
+          refreshTokenHash: null,
+          refreshTokenExpiresAt: null,
+        },
+      }),
+      this.prisma.passwordResetRequest.update({
+        where: { id: request.id },
+        data: { usedAt: now },
+      }),
+    ]);
   }
 }

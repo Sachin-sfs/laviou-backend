@@ -20,6 +20,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyResetOtpDto } from './dto/verify-reset-otp.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -116,13 +117,13 @@ export class AuthController {
   }
 
   @Post('forgot-password')
-  @ApiOperation({ summary: 'Request a password reset token (OTP)' })
+  @ApiOperation({ summary: 'Request a password reset OTP (sent by email)' })
   @ApiOkResponse({
     schema: {
       example: {
         success: true,
         message: 'If the email exists, a reset code was sent.',
-        data: { token: '123456' },
+        data: { sent: true },
       },
     },
   })
@@ -131,8 +132,27 @@ export class AuthController {
     return ok(res, 'If the email exists, a reset code was sent.');
   }
 
+  @Post('verify-reset-otp')
+  @ApiOperation({ summary: 'Verify OTP (from email) and get reset token' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        success: true,
+        message: 'OTP verified',
+        data: {
+          resetToken:
+            'b8c10f2e6b1c4a78b4bdf11d9e8e37d4d1a1d8d6f0a4d7f2b3c8f3d7a1b2c3d4',
+        },
+      },
+    },
+  })
+  async verifyResetOtp(@Body() body: VerifyResetOtpDto) {
+    const res = await this.auth.verifyResetOtp(body);
+    return ok(res, 'OTP verified');
+  }
+
   @Post('reset-password')
-  @ApiOperation({ summary: 'Reset password with OTP/token' })
+  @ApiOperation({ summary: 'Reset password with reset token' })
   @ApiOkResponse({
     schema: {
       example: { success: true, message: 'Password reset', data: true },

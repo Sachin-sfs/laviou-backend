@@ -48,12 +48,33 @@ model User {
   refreshTokenHash      String?
   refreshTokenExpiresAt DateTime?
 
+  passwordResetRequests PasswordResetRequest[]
   items Item[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("users")
+}
+
+model PasswordResetRequest {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  otpHash      String
+  otpExpiresAt DateTime
+  verifiedAt   DateTime?
+
+  resetTokenHash      String?
+  resetTokenExpiresAt DateTime?
+  usedAt              DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("password_reset_requests")
 }
 
 model Item {

@@ -10,23 +10,45 @@ const portSchema = z.preprocess((value) => {
   return undefined;
 }, z.number().int().positive().default(3000));
 
-const envSchema = z.object({
-  NODE_ENV: nodeEnvSchema,
-  PORT: portSchema,
+const envSchema = z
+  .object({
+    NODE_ENV: nodeEnvSchema,
+    PORT: portSchema,
 
-  // Use "*" or a comma-separated list (e.g. "http://localhost:3000,https://app.example.com")
-  CORS_ORIGIN: z.string().default('*'),
+    // Use "*" or a comma-separated list (e.g. "http://localhost:3000,https://app.example.com")
+    CORS_ORIGIN: z.string().default('*'),
 
-  // Get it from Supabase Dashboard → Project Settings → Database → Connection string.
-  // IMPORTANT: use the "Transaction pooler" string for serverless edge runtimes,
-  // but for a long-running Nest backend you can use the direct connection string.
-  DATABASE_URL: z.string().min(1),
-  // Direct DB connection (used by Prisma Migrate when DATABASE_URL uses PgBouncer)
-  DIRECT_URL: z.string().min(1),
+    // Get it from Supabase Dashboard → Project Settings → Database → Connection string.
+    // IMPORTANT: use the "Transaction pooler" string for serverless edge runtimes,
+    // but for a long-running Nest backend you can use the direct connection string.
+    DATABASE_URL: z.string().min(1),
+    // Direct DB connection (used by Prisma Migrate when DATABASE_URL uses PgBouncer)
+    DIRECT_URL: z.string().min(1),
 
-  JWT_ACCESS_SECRET: z.string().min(16),
-  JWT_REFRESH_SECRET: z.string().min(16),
-});
+    JWT_ACCESS_SECRET: z.string().min(16),
+    JWT_REFRESH_SECRET: z.string().min(16),
+    // Email (SendGrid) for password reset OTP
+    SENDGRID_API_KEY: z.string().min(1).optional(),
+    SENDGRID_FROM_EMAIL: z.string().email().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.NODE_ENV === 'production') {
+      if (!val.SENDGRID_API_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SENDGRID_API_KEY'],
+          message: 'Required in production',
+        });
+      }
+      if (!val.SENDGRID_FROM_EMAIL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SENDGRID_FROM_EMAIL'],
+          message: 'Required in production',
+        });
+      }
+    }
+  });
 
 export type AppEnv = z.infer<typeof envSchema>;
 
