@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ItemStatus {
+  active
+  sold
+  gifted
+  donated
+  archived
+}
+
+enum SharingVisibility {
+  private
+  friends
+  public
+}
+
+enum ConciergeRequestStatus {
+  pending
+  in_progress
+  completed
+  cancelled
+}
+
+enum ConciergeServiceType {
+  appraisal
+  authentication
+  restoration
+  storage
+  shipping
+}
+
+model User {
+  id           String  @id @default(uuid())
+  email        String  @unique
+  firstName    String
+  lastName     String
+  passwordHash String
+
+  items Item[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Item {
+  id          String     @id @default(uuid())
+  ownerId     String
+  owner       User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  description String
+  status      ItemStatus @default(active)
+  imageUrl    String?
+
+  // Optional metadata for lifecycle actions
+  soldPrice              Float?
+  soldCurrency           String?
+  giftedRecipientEmail   String?
+  giftedMessage          String?
+  donatedOrganizationId  String?
+  donatedNotes           String?
+
+  sharingSettings ItemSharingSettings?
+  conciergeRequests ConciergeRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@map("items")
+}
+
+model ItemSharingSettings {
+  id               String            @id @default(uuid())
+  itemId           String            @unique
+  item             Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  visibility       SharingVisibility @default(private)
+  sharedWithEmails String[]          @default([])
+  allowComments    Boolean           @default(false)
+  expiresAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("item_sharing_settings")
+}
+
+model ConciergeRequest {
+  id          String                  @id @default(uuid())
+  itemId      String
+  item        Item                    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  serviceType ConciergeServiceType
+  status      ConciergeRequestStatus  @default(pending)
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([itemId])
+  @@map("concierge_requests")
+}
+
