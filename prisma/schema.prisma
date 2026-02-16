@@ -44,6 +44,10 @@ model User {
   lastName     String
   passwordHash String
 
+  // Refresh token rotation (single active session)
+  refreshTokenHash      String?
+  refreshTokenExpiresAt DateTime?
+
   items Item[]
 
   createdAt DateTime @default(now())

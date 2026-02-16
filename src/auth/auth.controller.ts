@@ -18,6 +18,7 @@ import { AuthService } from './auth.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @ApiTags('auth')
@@ -79,8 +80,12 @@ export class AuthController {
       example: { success: true, message: 'Logged out', data: true },
     },
   })
-  logout() {
-    // Stateless JWT: frontend can just delete cookie/token.
+  @UseGuards(JwtAuthGuard)
+  @ApiJwtAuth()
+  async logout(@Req() req: Request) {
+    const userId = req.user?.userId;
+    if (!userId) throw new UnauthorizedException();
+    await this.auth.logout(userId);
     return ok(true as const, 'Logged out');
   }
 
@@ -137,5 +142,24 @@ export class AuthController {
     if (!body.password) throw new BadRequestException('Password is required');
     await this.auth.resetPassword(body.token, body.password);
     return ok(true as const, 'Password reset');
+  }
+
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh JWT tokens (rotates refresh token)' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        success: true,
+        message: 'Refreshed',
+        data: {
+          accessToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+          refreshToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        },
+      },
+    },
+  })
+  async refresh(@Body() body: RefreshTokenDto) {
+    const tokens = await this.auth.refresh(body.refreshToken);
+    return ok(tokens, 'Refreshed');
   }
 }
